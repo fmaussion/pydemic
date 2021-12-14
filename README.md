@@ -8,6 +8,9 @@ It is not at all optimized for performance and does not have any predictive skil
 
 Based on an original idea by Georg Wohlfahrt.
 
+![image](https://user-images.githubusercontent.com/10050469/145910107-6ded3c2e-bcd5-40dd-8cc2-18842aa11d11.png)
+
+
 ## Rules
 
 We are simulating a square 2-dimensional (nx x nx pixel) domain which is populated 
@@ -46,7 +49,7 @@ There are many. See [exercises](https://fabienmaussion.info/scientific_programmi
 
 ## Getting started
 
-Download the code and run `pydemic.py` in the terminal or in the ipython interpreter.
+[Download the code](https://github.com/fmaussion/pydemic/archive/refs/heads/master.zip) and run `pydemic.py` in the terminal or in the ipython interpreter.
 
 ## TODO Fabien
 
