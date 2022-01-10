@@ -1,12 +1,14 @@
 """Agent-base pandemic simulator in Python.
 
-Based on an original idea by Georg Wohlfahrt and loosely adapted from his
-MATLAB code.
+Based on an original idea by Georg Wohlfahrt.
 """
+
+__version__ = '0.2'
 
 import time
 from collections import Counter
 import numpy as np
+import xarray as xr
 from numpy.random import default_rng
 import matplotlib.pyplot as plt
 
@@ -16,6 +18,8 @@ class GameMaster:
 
     A little bit like God, if you like. There is only one instance per game.
     """
+
+    pos_when_out = (-1, -1)
 
     def __init__(self, t0=0, seed=None, npix=100):
         """Instantiate the object.
@@ -41,7 +45,8 @@ class GameMaster:
         -------
         tuple of (x, y) positions.
         """
-        return tuple(self.rng.integers(low=0, high=self.npix, size=2, endpoint=True))
+        # npix is excluded, so the range of values is [0, npix[
+        return tuple(self.rng.integers(low=0, high=self.npix, size=2))
 
     def get_random_move(self, movemax):
         """Get a random agent move in the x and y direction.
@@ -102,17 +107,19 @@ class GameMaster:
         return self.rng.random(size=size)
 
 
-class Agent:
-    """The Agent moves around and eventually gets sick.
+class NaiveAgent:
+    """The Agent moves around and eventually gets sick or immune.
 
-    It all depends on the gamemaster.
+    It all depends on the GameMaster.
     """
 
     def __init__(self,
                  gamemaster,
                  movemax=5,
                  time_until_recovery=10,
-                 mortality_rate=0.01,
+                 time_hospitalised=10,
+                 hospitalisation_rate=0.1,
+                 mortality_rate=0.1,
                  probability_of_infection=0.5,
                  ):
 
@@ -121,11 +128,16 @@ class Agent:
         self.immune = False
         self.infected = False
         self.deceased = False
+        self.quarantined = False
+        self.hospitalised = False
         self.time_of_infection = None
         self.probability_of_infection = probability_of_infection
         self.time_until_recovery = time_until_recovery
+        self.time_hospitalised = time_hospitalised
+        self.hospitalisation_rate = hospitalisation_rate
         self.mortality_rate = mortality_rate
         self.pos = self.gamemaster.get_random_pos()
+        self.agent_time = gamemaster.t
 
     def move(self):
         """We move in the domain
@@ -135,9 +147,9 @@ class Agent:
         the (x, y) position.
         """
 
-        if self.deceased:
+        if self.deceased or self.quarantined or self.hospitalised:
             # Dead agents are out
-            return -1, -1
+            return self.gamemaster.pos_when_out
 
         # Tell me where to go
         mx, my = self.gamemaster.get_random_move(self.movemax)
@@ -154,52 +166,105 @@ class Agent:
 
     def contact(self):
         """Agent in contact with an infectious person. Decide what happens."""
-        if self.immune or self.infected:
-            # Nothing happens there
+
+        if self.immune:
+            # Nothing happens
             return
 
         # Let fate decide
         v = self.gamemaster.get_random_float()
         if v < self.probability_of_infection:
             self.infected = True
+            self.immune = True
             self.time_of_infection = self.gamemaster.t
 
-    @property
-    def contagious(self):
-        """Is the agent contagious?"""
-        if self.deceased or not self.infected:
-            # Nope
-            return False
+    def _decide_quarantine(self):
+        """We are naive we dont quarantine"""
+        pass
 
-        # Maybe
-        if self.gamemaster.t > (self.time_of_infection + self.time_until_recovery):
-            # Ok we are recovered
-            self.infected = False
-            self.immune = True
-            # Maybe dead
+    def _decide_hospitalisation_or_death(self):
+
+        if not self.infected:
+            # Nothing to do here
+            return
+
+        # Maybe bad things happen
+        tor = self.time_of_infection + self.time_until_recovery
+        if self.agent_time >= tor and not self.hospitalised:
+            # Decide on hospitalisation or recovery
+            v = self.gamemaster.get_random_float()
+            if v < self.hospitalisation_rate:
+                self.hospitalised = True
+            else:
+                # We recovered
+                self.infected = False
+                self.hospitalised = False
+                self.quarantined = False
+
+        torh = tor + self.time_hospitalised
+        if self.agent_time >= torh and self.hospitalised:
+            # Decide on death or recovery
             v = self.gamemaster.get_random_float()
             if v < self.mortality_rate:
                 self.deceased = True
+                self.infected = False
+                self.hospitalised = False
+                self.quarantined = False
+            else:
+                self.infected = False
+                self.hospitalised = False
+                self.quarantined = False
+
+    def _decide_status(self):
+        """Make the agent decide on its statut.
+
+        This method needs to be called at least once per simulation day.
+        """
+
+        if self.agent_time == self.gamemaster.t:
+            # We already decided what our state is
+            return
+
+        # New time
+        self.agent_time = self.gamemaster.t
+
+        self._decide_quarantine()
+        self._decide_hospitalisation_or_death()
+
+    @property
+    def contagious(self):
+        """Is the agent contagious? This has to be called once per turn!
+        """
+
+        self._decide_status()
+
+        if not self.infected or self.deceased or self.quarantined or self.hospitalised:
+            # Nope
+            return False
 
         return self.infected
 
 
 def game(seed=None,  # Repeat random results?
          n_agents=10000,  # Number of agents in the domain
+         agent_class=NaiveAgent,  # The type of agent to use
          npix=100,  # Domain size
          nt=100,  # number time steps (days) in the simulation
          stop_when_extinct=False,  # stop the simulation if the virus is extinct
          n_initial_infected=5,  # Number of initially infected agents
          movemax=5,  # Agents max movements
-         time_until_recovery=10,  # Agents days until recovery after infection
-         mortality_rate=0.01,  # Mortality rate at the end of the infection
+         time_until_recovery=9,  # Agents days until recovery after infection
+         time_hospitalised=9,  # Agents days until recovery after hospitalisation
+         hospitalisation_rate=0.1,  # Hospitalisation rate at the end of the infection
+         mortality_rate=0.1,  # Mortality rate at the end of the hospitalisation
          probability_of_infection=0.5,  # Probability of being infected if one other agent is infected
+         log=True,  # Print simulation log on screen - if False, only log last step
          ):
     """Run a pandemic simulation.
 
     Returns
     -------
-    the gamemaster, with some results attached to it.
+    the simulation results as an xarray dataset
     """
     # Timer
     start_time = time.time()
@@ -208,60 +273,112 @@ def game(seed=None,  # Repeat random results?
     gamemaster = GameMaster(seed=seed, npix=npix)
     agents = []
     for _ in range(n_agents):
-        agents.append(Agent(gamemaster,
-                            movemax=movemax,
-                            time_until_recovery=time_until_recovery,
-                            mortality_rate=mortality_rate,
-                            probability_of_infection=probability_of_infection)
+        agents.append(agent_class(gamemaster,
+                                  movemax=movemax,
+                                  time_until_recovery=time_until_recovery,
+                                  time_hospitalised=time_hospitalised,
+                                  hospitalisation_rate=hospitalisation_rate,
+                                  mortality_rate=mortality_rate,
+                                  probability_of_infection=probability_of_infection)
                       )
 
     # Fate: who is infected
     for idx in gamemaster.get_random_integer(0, n_agents-1, n_initial_infected):
         agents[idx].infected = True
+        agents[idx].immune = True
         agents[idx].time_of_infection = gamemaster.t
 
-    # Output
-    gamemaster.n_infected = []
-    gamemaster.n_deceased = []
-    gamemaster.n_immune = []
-
     # Data containers (its faster to create them only once before the game)
-    is_contagious = np.zeros(n_agents, dtype=bool)
-    is_deceased = np.zeros(n_agents, dtype=bool)
-    is_immune = np.zeros(n_agents, dtype=bool)
+    n_infected = np.zeros((nt + 1,), dtype=int)
+    n_deceased = np.zeros((nt + 1,), dtype=int)
+    n_immune = np.zeros((nt + 1,), dtype=int)
+    n_vulnerable = np.zeros((nt + 1,), dtype=int)
+    n_hospitalised = np.zeros((nt + 1,), dtype=int)
+    n_quarantined = np.zeros((nt + 1,), dtype=int)
+
+    is_infected = np.zeros((nt + 1, n_agents), dtype=bool)
+    is_deceased = np.zeros((nt + 1, n_agents), dtype=bool)
+    is_immune = np.zeros((nt + 1, n_agents), dtype=bool)
+    is_hospitalised = np.zeros((nt + 1, n_agents), dtype=bool)
+    is_quarantined = np.zeros((nt + 1, n_agents), dtype=bool)
+
+    agent_density = np.zeros((nt + 1, npix, npix), dtype=np.int32)
+    contagious_density = np.zeros((nt + 1, npix, npix), dtype=np.int32)
+    immune_density = np.zeros((nt + 1, npix, npix), dtype=np.int32)
+
+    # Add the data containers to an xarray dataset
+    ds = xr.Dataset()
+    ds['time'] = (('time', ), np.arange(nt + 1, dtype=int))
+    ds['agents'] = (('agents', ), np.arange(n_agents, dtype=int))
+    ds['x'] = (('x', ), np.arange(npix, dtype=int))
+    ds['y'] = (('y', ), np.arange(npix, dtype=int))
+
+    ds['n_infected'] = (('time', ), n_infected)
+    ds['n_immune'] = (('time', ), n_immune)
+    ds['n_vulnerable'] = (('time', ), n_vulnerable)
+    ds['n_hospitalised'] = (('time', ), n_hospitalised)
+    ds['n_quarantined'] = (('time', ), n_quarantined)
+    ds['n_deceased'] = (('time', ), n_deceased)
+
+    ds['is_infected'] = (('time', 'agents'), is_infected)
+    ds['is_deceased'] = (('time', 'agents'), is_deceased)
+    ds['is_immune'] = (('time', 'agents'), is_immune)
+    ds['is_hospitalised'] = (('time', 'agents'), is_hospitalised)
+    ds['is_quarantined'] = (('time', 'agents'), is_quarantined)
+
+    ds['agent_density'] = (('time', 'y', 'x'), agent_density)
+    ds['contagious_density'] = (('time', 'y', 'x'), contagious_density)
+    ds['immune_density'] = (('time', 'y', 'x'), immune_density)
 
     # Lets go
     while gamemaster.t <= nt:
 
-        pos_infected = []
-        for i, a in enumerate(agents):
+        pos_contagious = []
+        for k, a in enumerate(agents):
             p = a.move()
-            c = a.contagious
-            if c:
-                pos_infected.append(p)
+            cont, imm = a.contagious, a.immune
+            out = a.quarantined or a.hospitalised or a.deceased
+            if cont:
+                pos_contagious.append(p)
+                contagious_density[gamemaster.t, p[1], p[0]] += 1
+            if not out:
+                agent_density[gamemaster.t, p[1], p[0]] += 1
+                if imm:
+                    immune_density[gamemaster.t, p[1], p[0]] += 1
 
-            is_contagious[i] = c
-            is_deceased[i] = a.deceased
-            is_immune[i] = a.immune
+            is_infected[gamemaster.t, k] = a.infected
+            is_immune[gamemaster.t, k] = a.immune
+            is_quarantined[gamemaster.t, k] = a.quarantined
+            is_hospitalised[gamemaster.t, k] = a.hospitalised
+            is_deceased[gamemaster.t, k] = a.deceased
 
-        pos_infected = Counter(pos_infected)
+        pos_contagious = Counter(pos_contagious)
         for a in agents:
-            if a.pos in pos_infected:
-                # The probably to get infected is higher if there are more
+            if a.pos in pos_contagious:
+                # The probability to get infected is higher if there are more
                 # agents infected in one cell
-                for _ in range(pos_infected[a.pos]):
+                for _ in range(pos_contagious[a.pos]):
                     a.contact()
 
-        gamemaster.n_infected.append(is_contagious.sum())
-        gamemaster.n_deceased.append(is_deceased.sum())
-        gamemaster.n_immune.append(is_immune.sum())
+        n_i = is_immune[gamemaster.t, :].sum()
+        n_d = is_deceased[gamemaster.t, :].sum()
+        n_infected[gamemaster.t] = is_infected[gamemaster.t, :].sum()
+        n_immune[gamemaster.t] = n_i
+        n_vulnerable[gamemaster.t] = n_agents - n_i - n_d
+        n_quarantined[gamemaster.t] = is_quarantined[gamemaster.t, :].sum()
+        n_hospitalised[gamemaster.t] = is_hospitalised[gamemaster.t, :].sum()
+        n_deceased[gamemaster.t] = n_d
 
-        print(f"Day {gamemaster.t:3d}. "
-              f"N infected: {gamemaster.n_infected[-1]:5d}. "
-              f"N immune: {gamemaster.n_immune[-1]:5d}. "
-              f"N deceased: {gamemaster.n_deceased[-1]:5d}.")
+        if log:
+            print(f"Day {gamemaster.t:3d}. "
+                  f"N infected: {n_infected[gamemaster.t]:5d}. "
+                  f"N vulnerable: {n_vulnerable[gamemaster.t]:5d}. "
+                  f"N immune: {n_immune[gamemaster.t]:5d}. "
+                  f"N quarantined: {n_quarantined[gamemaster.t]:5d}. "
+                  f"N hospitalised: {n_hospitalised[gamemaster.t]:5d}. "
+                  f"N deceased: {n_deceased[gamemaster.t]:5d}. ")
 
-        if stop_when_extinct and gamemaster.n_infected[-1] == 0:
+        if stop_when_extinct and n_infected[gamemaster.t] == 0:
             # Nothing left to compute
             break
         gamemaster.t += 1
@@ -269,19 +386,21 @@ def game(seed=None,  # Repeat random results?
     total_time = time.time() - start_time
     print(f"Simulation done. Total time: {total_time:.1f}s")
 
-    return gamemaster
+    return ds
 
 
 if __name__ == '__main__':
 
     # Demo game without measures and with measures
-    gm1 = game(seed=1)
-    gm2 = game(seed=1, movemax=2)
+    gm1 = game(seed=0)
+    gm2 = game(seed=0, movemax=2)
 
     plt.plot(gm1.n_infected, color='C0', label='Infected')
     plt.plot(gm2.n_infected, color='C0', linestyle='--')
     plt.plot(gm1.n_immune, color='C1', label='Immune')
     plt.plot(gm2.n_immune, color='C1', linestyle='--')
+    plt.plot(gm1.n_hospitalised, color='C2', label='Hospitalised')
+    plt.plot(gm2.n_hospitalised, color='C2', linestyle='--')
     plt.plot(gm1.n_deceased, color='C3', label='Deceased (cum)')
     plt.plot(gm2.n_deceased, color='C3', linestyle='--')
     plt.legend()
