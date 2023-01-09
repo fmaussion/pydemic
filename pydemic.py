@@ -257,7 +257,7 @@ def game(seed=None,  # Repeat random results?
          time_hospitalised=9,  # Agents days until recovery after hospitalisation
          hospitalisation_rate=0.1,  # Hospitalisation rate at the end of the infection
          mortality_rate=0.1,  # Mortality rate at the end of the hospitalisation
-         probability_of_infection=0.5,  # Probability of being infected if one other agent is infected
+         probability_of_infection=0.5,  # Probability of being infected if one other agent on the cell is infected
          log=True,  # Print simulation log on screen - if False, only log last step
          ):
     """Run a pandemic simulation.
@@ -336,14 +336,13 @@ def game(seed=None,  # Repeat random results?
         pos_contagious = []
         for k, a in enumerate(agents):
             p = a.move()
-            cont, imm = a.contagious, a.immune
-            out = a.quarantined or a.hospitalised or a.deceased
-            if cont:
+            if a.contagious:
                 pos_contagious.append(p)
                 contagious_density[gamemaster.t, p[1], p[0]] += 1
-            if not out:
+            out_of_map = a.quarantined or a.hospitalised or a.deceased
+            if not out_of_map:
                 agent_density[gamemaster.t, p[1], p[0]] += 1
-                if imm:
+                if a.immune:
                     immune_density[gamemaster.t, p[1], p[0]] += 1
 
             is_infected[gamemaster.t, k] = a.infected
@@ -391,8 +390,10 @@ def game(seed=None,  # Repeat random results?
 
 if __name__ == '__main__':
 
-    # Demo game without measures and with measures
+    # Demo game without containment measures...
     gm1 = game(seed=0)
+
+    # ... and with mobility reduction measures
     gm2 = game(seed=0, movemax=2)
 
     plt.plot(gm1.n_infected, color='C0', label='Infected')
