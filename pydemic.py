@@ -245,6 +245,19 @@ class NaiveAgent:
         return self.infected
 
 
+class PolicyAwareAgent(NaiveAgent):
+
+    def _decide_quarantine(self):
+        """We are naive we dont quarantine"""
+        if not self.infected or self.hospitalised or self.deceased:
+            self.quarantined = False
+            return
+
+        tor = self.time_of_infection + 5
+        if self.agent_time >= tor:
+            self.quarantined = True
+
+
 def game(seed=None,  # Repeat random results?
          n_agents=10000,  # Number of agents in the domain
          agent_class=NaiveAgent,  # The type of agent to use
@@ -394,7 +407,7 @@ if __name__ == '__main__':
     gm1 = game(seed=0)
 
     # ... and with mobility reduction measures
-    gm2 = game(seed=0, movemax=2)
+    gm2 = game(seed=0, agent_class=PolicyAwareAgent)
 
     plt.plot(gm1.n_infected, color='C0', label='Infected')
     plt.plot(gm2.n_infected, color='C0', linestyle='--')
@@ -402,7 +415,17 @@ if __name__ == '__main__':
     plt.plot(gm2.n_immune, color='C1', linestyle='--')
     plt.plot(gm1.n_hospitalised, color='C2', label='Hospitalised')
     plt.plot(gm2.n_hospitalised, color='C2', linestyle='--')
+    plt.plot(gm1.n_quarantined, color='C4', label='Quarantined')
+    plt.plot(gm2.n_quarantined, color='C4', linestyle='--')
     plt.plot(gm1.n_deceased, color='C3', label='Deceased (cum)')
     plt.plot(gm2.n_deceased, color='C3', linestyle='--')
+    plt.legend()
+    plt.show()
+
+    plt.plot(gm2.n_infected, color='C0', label='Infected')
+    plt.plot(gm2.n_immune, color='C1', label='Immune')
+    plt.plot(gm2.n_hospitalised, color='C2', label='Hospitalised')
+    plt.plot(gm2.n_quarantined, color='C4', label='Quarantined')
+    plt.plot(gm2.n_deceased, color='C3', label='Deceased (cum)')
     plt.legend()
     plt.show()
