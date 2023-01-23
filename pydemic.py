@@ -121,6 +121,7 @@ class NaiveAgent:
                  hospitalisation_rate=0.1,
                  mortality_rate=0.1,
                  probability_of_infection=0.5,
+                 time_until_immunity_loss=None,
                  ):
 
         self.gamemaster = gamemaster
@@ -136,6 +137,7 @@ class NaiveAgent:
         self.time_hospitalised = time_hospitalised
         self.hospitalisation_rate = hospitalisation_rate
         self.mortality_rate = mortality_rate
+        self.time_until_immunity_loss = time_until_immunity_loss
         self.pos = self.gamemaster.get_random_pos()
         self.agent_time = gamemaster.t
 
@@ -215,6 +217,14 @@ class NaiveAgent:
                 self.hospitalised = False
                 self.quarantined = False
 
+    def _decide_end_immunity(self):
+        if not self.immune or not self.time_until_immunity_loss:
+            # Nothing to do
+            return
+        if self.agent_time - self.time_of_infection >= self.time_until_immunity_loss:
+            self.immune = False
+            self.time_of_infection = None
+
     def _decide_status(self):
         """Make the agent decide on its statut.
 
@@ -230,6 +240,7 @@ class NaiveAgent:
 
         self._decide_quarantine()
         self._decide_hospitalisation_or_death()
+        self._decide_end_immunity()
 
     @property
     def contagious(self):
@@ -258,6 +269,7 @@ def game(seed=None,  # Repeat random results?
          hospitalisation_rate=0.1,  # Hospitalisation rate at the end of the infection
          mortality_rate=0.1,  # Mortality rate at the end of the hospitalisation
          probability_of_infection=0.5,  # Probability of being infected if one other agent on the cell is infected
+         time_until_immunity_loss=None,  # Time after infection when immunity is lost (None means no immunity loss)
          log=True,  # Print simulation log on screen - if False, only log last step
          ):
     """Run a pandemic simulation.
@@ -279,7 +291,8 @@ def game(seed=None,  # Repeat random results?
                                   time_hospitalised=time_hospitalised,
                                   hospitalisation_rate=hospitalisation_rate,
                                   mortality_rate=mortality_rate,
-                                  probability_of_infection=probability_of_infection)
+                                  probability_of_infection=probability_of_infection,
+                                  time_until_immunity_loss=time_until_immunity_loss)
                       )
 
     # Fate: who is infected
@@ -394,7 +407,7 @@ if __name__ == '__main__':
     gm1 = game(seed=0)
 
     # ... and with mobility reduction measures
-    gm2 = game(seed=0, movemax=2)
+    gm2 = game(seed=0, time_until_immunity_loss=50)
 
     plt.plot(gm1.n_infected, color='C0', label='Infected')
     plt.plot(gm2.n_infected, color='C0', linestyle='--')
